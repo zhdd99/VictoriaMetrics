@@ -1,3 +1,12 @@
+packer {
+  required_plugins {
+    digitalocean = {
+      version = ">= 1.0.4"
+      source  = "github.com/digitalocean/digitalocean"
+    }
+  }
+}
+
 variable "token" {
   type        = string
   default     = "${env("DIGITALOCEAN_API_TOKEN")}"
@@ -6,7 +15,7 @@ variable "token" {
 
 variable "image_id" {
   type        = string
-  default     = "ubuntu-20-04-x64"
+  default     = "ubuntu-22-04-x64"
   description = "DigitalOcean linux image ID."
 }
 
