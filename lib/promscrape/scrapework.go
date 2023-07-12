@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+	"github.com/cespare/xxhash/v2"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/auth"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bloomfilter"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
@@ -29,8 +32,6 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/prometheus/stream"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/proxy"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/timerpool"
-	"github.com/VictoriaMetrics/metrics"
-	"github.com/cespare/xxhash/v2"
 )
 
 var (
@@ -498,15 +499,18 @@ func (sw *scrapeWork) processScrapedData(scrapeTimestamp, realTimestamp int64, b
 	if sw.seriesLimitExceeded || !areIdenticalSeries {
 		samplesDropped = sw.applySeriesLimit(wc)
 	}
-	am := &autoMetrics{
-		up:                        up,
-		scrapeDurationSeconds:     duration,
-		samplesScraped:            samplesScraped,
-		samplesPostRelabeling:     samplesPostRelabeling,
-		seriesAdded:               seriesAdded,
-		seriesLimitSamplesDropped: samplesDropped,
-	}
+
+	am := autoMetricsPool.Get().(*autoMetrics)
+	am.up = up
+	am.scrapeDurationSeconds = duration
+	am.samplesScraped = samplesScraped
+	am.samplesPostRelabeling = samplesPostRelabeling
+	am.seriesAdded = seriesAdded
+	am.seriesLimitSamplesDropped = samplesDropped
+
 	sw.addAutoMetrics(am, wc, scrapeTimestamp)
+	autoMetricsPool.Put(am)
+
 	sw.pushData(sw.Config.AuthToken, &wc.writeRequest)
 	sw.prevLabelsLen = len(wc.labels)
 	sw.prevBodyLen = len(bodyString)
@@ -634,15 +638,17 @@ func (sw *scrapeWork) scrapeStream(scrapeTimestamp, realTimestamp int64) error {
 		// This is a trade-off between performance and accuracy.
 		seriesAdded = sw.getSeriesAdded(lastScrape, bodyString)
 	}
-	am := &autoMetrics{
-		up:                        up,
-		scrapeDurationSeconds:     duration,
-		samplesScraped:            samplesScraped,
-		samplesPostRelabeling:     samplesPostRelabeling,
-		seriesAdded:               seriesAdded,
-		seriesLimitSamplesDropped: samplesDropped,
-	}
+	am := autoMetricsPool.Get().(*autoMetrics)
+	am.up = up
+	am.scrapeDurationSeconds = duration
+	am.samplesScraped = samplesScraped
+	am.samplesPostRelabeling = samplesPostRelabeling
+	am.seriesAdded = seriesAdded
+	am.seriesLimitSamplesDropped = samplesDropped
+
 	sw.addAutoMetrics(am, wc, scrapeTimestamp)
+	autoMetricsPool.Put(am)
+
 	sw.pushData(sw.Config.AuthToken, &wc.writeRequest)
 	sw.prevLabelsLen = len(wc.labels)
 	sw.prevBodyLen = sbr.bodyLen
@@ -832,8 +838,11 @@ func (sw *scrapeWork) sendStaleSeries(lastScrape, currScrape string, timestamp i
 		}
 	}
 	if addAutoSeries {
-		am := &autoMetrics{}
+		am := autoMetricsPool.Get().(*autoMetrics)
+		// Reset am before adding auto metrics in order use default values for am fields.
+		am.reset()
 		sw.addAutoMetrics(am, wc, timestamp)
+		autoMetricsPool.Put(am)
 	}
 	setStaleMarkersForRows(wc.writeRequest.Timeseries)
 	sw.pushData(sw.Config.AuthToken, &wc.writeRequest)
@@ -870,6 +879,21 @@ type autoMetrics struct {
 	samplesPostRelabeling     int
 	seriesAdded               int
 	seriesLimitSamplesDropped int
+}
+
+func (am *autoMetrics) reset() {
+	am.up = 0
+	am.scrapeDurationSeconds = 0
+	am.samplesScraped = 0
+	am.samplesPostRelabeling = 0
+	am.seriesAdded = 0
+	am.seriesLimitSamplesDropped = 0
+}
+
+var autoMetricsPool = sync.Pool{
+	New: func() interface{} {
+		return &autoMetrics{}
+	},
 }
 
 func isAutoMetric(s string) bool {
