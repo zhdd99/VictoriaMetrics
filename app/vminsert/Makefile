@@ -96,5 +96,11 @@ vminsert-openbsd-amd64:
 vminsert-windows-amd64:
 	GOARCH=amd64 APP_NAME=vminsert $(MAKE) app-local-windows-goarch
 
+vminsert-darwin-amd64:
+	APP_NAME=vminsert CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(MAKE) app-local-goos-goarch
+
+vminsert-darwin-arm64:
+	APP_NAME=vminsert CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(MAKE) app-local-goos-goarch
+
 vminsert-pure:
 	APP_NAME=vminsert $(MAKE) app-local-pure
