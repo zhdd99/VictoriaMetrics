@@ -16,6 +16,22 @@ services:
     networks:
       - vm_net
     restart: always
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.14.0
+    depends_on:
+      - "victoriametrics"
+    ports:
+      - 9090:9090
+    volumes:
+      - promdata:/prometheus
+      - ./prometheus-prom.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - vm_net
+    restart: always
   victoriametrics:
     container_name: victoriametrics
     image: victoriametrics/victoria-metrics:v1.93.1
@@ -96,5 +112,6 @@ volumes:
   vmagentdata: {}
   vmdata: {}
   grafanadata: {}
+  promdata: {}
 networks:
   vm_net:
