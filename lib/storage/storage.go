@@ -1904,13 +1904,13 @@ func (s *Storage) addMissingMetricIDToTSIDEntries(rows []rawRow) {
 	for i := range rows {
 		tsid := &rows[i].TSID
 		err := idb.getFromMetricIDCache(&tsidBuf, tsid.MetricID)
-		if err == nil && *tsid == *tsidBuf {
+		if err == nil && *tsid == tsidBuf {
 			continue
 		}
 		if err != io.EOF {
 			logger.Panicf("FATAL: unexpected error when obtaining TSID for the given MetricID from cache: %s", err)
 		}
-		if !is.getTSIDByMetricID(tsidBuf, tsid.MetricID) {
+		if !is.getTSIDByMetricID(&tsidBuf, tsid.MetricID) || *tsid != tsidBuf {
 			logger.Infof("Creating missing MetricID->TSID entry for MetricID=%d", tsid.MetricID)
 			ii.B = marshalCommonPrefix(ii.B, nsPrefixMetricIDToTSID)
 			ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
