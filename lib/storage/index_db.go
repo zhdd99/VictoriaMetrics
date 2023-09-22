@@ -1742,6 +1742,7 @@ func (db *indexDB) getTSIDsFromMetricIDs(qt *querytracer.Tracer, metricIDs []uin
 		db.doExtDB(func(extDB *indexDB) {
 			is := extDB.getIndexSearch(deadline)
 			defer extDB.putIndexSearch(is)
+			var metricNameBuf []byte
 			for loopsPaceLimiter, metricID := range extMetricIDs {
 				if loopsPaceLimiter&paceLimiterSlowIterationsMask == 0 {
 					if err = checkSearchDeadlineAndPace(is.deadline); err != nil {
@@ -1757,6 +1758,11 @@ func (db *indexDB) getTSIDsFromMetricIDs(qt *querytracer.Tracer, metricIDs []uin
 					// due to snapshot or due to unflushed entries.
 					// Just increment errors counter and skip it for now.
 					atomic.AddUint64(&is.db.missingTSIDsForMetricID, 1)
+
+					// Try restoring TSID for the given metricID from MetricID -> MetricName cache.
+					metricNameBuf, err := is.searchMetricNameWithCache(metricNameBuf[:0], metricID)
+					if err != nil {
+					}
 					continue
 				}
 				is.db.putToMetricIDCache(metricID, tsid)
