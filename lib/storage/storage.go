@@ -1881,12 +1881,47 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 	if err != nil {
 		err = fmt.Errorf("cannot update per-date data: %w", err)
 	} else {
+		s.addMissingMetricIDToTSIDEntries(rows)
 		s.tb.MustAddRows(rows)
 	}
 	if err != nil {
 		return fmt.Errorf("error occurred during rows addition: %w", err)
 	}
 	return nil
+}
+
+func (s *Storage) addMissingMetricIDToTSIDEntries(rows []rawRow) {
+	// this function is needed for recovering missing metricID -> TSID entries
+	// in the issue https://github.com/VictoriaMetrics/VictoriaMetrics/issues/4972
+
+	idb := s.idb()
+	is := idb.getIndexSearch(noDeadline)
+	defer idb.putIndexSearch(is)
+	ii := getIndexItems()
+	defer putIndexItems(ii)
+
+	var tsidBuf TSID
+	for i := range rows {
+		tsid := &rows[i].TSID
+		err := idb.getFromMetricIDCache(&tsidBuf, tsid.MetricID)
+		if err == nil && *tsid == *tsidBuf {
+			continue
+		}
+		if err != io.EOF {
+			logger.Panicf("FATAL: unexpected error when obtaining TSID for the given MetricID from cache: %s", err)
+		}
+		if !is.getTSIDByMetricID(tsidBuf, tsid.MetricID) {
+			logger.Infof("Creating missing MetricID->TSID entry for MetricID=%d", tsid.MetricID)
+			ii.B = marshalCommonPrefix(ii.B, nsPrefixMetricIDToTSID)
+			ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
+			ii.B = tsid.Marshal(ii.B)
+			ii.Next()
+		}
+		idb.putToMetricIDCache(tsid.MetricID, tsid)
+	}
+	if len(ii.Items) > 0 {
+		is.db.tb.AddItems(ii.Items)
+	}
 }
 
 var storageAddRowsLogger = logger.WithThrottler("storageAddRows", 5*time.Second)
