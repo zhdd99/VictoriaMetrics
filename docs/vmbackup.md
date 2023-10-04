@@ -147,7 +147,8 @@ See [this article](https://medium.com/@valyala/speeding-up-backups-for-big-time-
 ## Troubleshooting
 
 * If the backup is slow, then try setting higher value for `-concurrency` flag. This will increase the number of concurrent workers that upload data to backup storage.
-* If `vmbackup` eats all the network bandwidth, then set `-maxBytesPerSecond` to the desired value.
+* If `vmbackup` eats all the network bandwidth or CPU, then either decrease the `-concurrency` command-line flag value or set `-maxBytesPerSecond` command-line flag value to lower value.
+* If `vmbackup` consumes all the CPU on systems with big number of CPU cores, then try running it with `-filestream.disableFadvise` command-line flag.
 * If `vmbackup` has been interrupted due to temporary error, then just restart it with the same args. It will resume the backup process.
 * Backups created from [single-node VictoriaMetrics](https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html) cannot be restored
   at [cluster VictoriaMetrics](https://docs.victoriametrics.com/Cluster-VictoriaMetrics.html) and vice versa.
@@ -303,6 +304,8 @@ Run `vmbackup -help` in order to see all the available options:
      Prefix for environment variables if -envflag.enable is set
   -eula
      Deprecated, please use -license or -licenseFile flags instead. By specifying this flag, you confirm that you have an enterprise license and accept the ESA https://victoriametrics.com/legal/esa/ . This flag is available only in VictoriaMetrics enterprise. See https://docs.victoriametrics.com/enterprise.html
+  -filestream.disableFadvise
+     Whether to disable fadvise() syscall when reading large data files. The fadvise() syscall prevents from eviction of recently accessed data from OS page cache during background merges and backups. In some rare cases it is better to disable the syscall if it uses too much CPU
   -flagsAuthKey string
      Auth key for /flags endpoint. It must be passed via authKey query arg. It overrides httpAuth.* settings
   -fs.disableMmap
