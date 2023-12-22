@@ -1716,6 +1716,7 @@ func evalRollupFuncNoCache(qt *querytracer.Tracer, ec *EvalConfig, funcName stri
 	if err != nil {
 		return nil, err
 	}
+	defer netstorage.PutResults(rss)
 	ec.updateIsPartialResponse(isPartial)
 	rssLen := rss.Len()
 	if rssLen == 0 {

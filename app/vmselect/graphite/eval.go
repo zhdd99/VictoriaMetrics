@@ -163,6 +163,7 @@ func newNextSeriesForSearchQuery(ec *evalConfig, sq *storage.SearchQuery, expr g
 	seriesCh := make(chan *series, cgroup.AvailableCPUs())
 	errCh := make(chan error, 1)
 	go func() {
+		defer netstorage.PutResults(rss)
 		err := rss.RunParallel(nil, func(rs *netstorage.Result, workerID uint) error {
 			nameWithTags := getCanonicalPath(&rs.MetricName)
 			tags := unmarshalTags(nameWithTags)

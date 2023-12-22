@@ -3,7 +3,6 @@ package prometheus
 import (
 	"flag"
 	"fmt"
-	"github.com/VictoriaMetrics/metricsql"
 	"math"
 	"net"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/VictoriaMetrics/metricsql"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmselect/netstorage"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmselect/promql"
@@ -122,6 +123,7 @@ func FederateHandler(startTime time.Time, at *auth.Token, w http.ResponseWriter,
 	if err != nil {
 		return fmt.Errorf("cannot fetch data for %q: %w", sq, err)
 	}
+	defer netstorage.PutResults(rss)
 	if isPartial {
 		return fmt.Errorf("cannot export federated metrics, because some of vmstorage nodes are unavailable")
 	}
@@ -185,6 +187,7 @@ func ExportCSVHandler(startTime time.Time, at *auth.Token, w http.ResponseWriter
 			return fmt.Errorf("cannot fetch data for %q: %w", sq, err)
 		}
 		go func() {
+			defer netstorage.PutResults(rss)
 			err := rss.RunParallel(nil, func(rs *netstorage.Result, workerID uint) error {
 				if err := bw.Error(); err != nil {
 					return err
@@ -396,6 +399,7 @@ func exportHandler(qt *querytracer.Tracer, at *auth.Token, w http.ResponseWriter
 		}
 		qtChild := qt.NewChild("background export format=%s", format)
 		go func() {
+			defer netstorage.PutResults(rss)
 			err := rss.RunParallel(qtChild, func(rs *netstorage.Result, workerID uint) error {
 				if err := bw.Error(); err != nil {
 					return err
@@ -959,7 +963,8 @@ func QueryRangeHandler(qt *querytracer.Tracer, startTime time.Time, at *auth.Tok
 }
 
 func queryRangeHandler(qt *querytracer.Tracer, startTime time.Time, at *auth.Token, w http.ResponseWriter, query string,
-	start, end, step int64, r *http.Request, ct int64, etfs [][]storage.TagFilter) error {
+	start, end, step int64, r *http.Request, ct int64, etfs [][]storage.TagFilter,
+) error {
 	deadline := searchutils.GetDeadlineForQuery(r, startTime)
 	mayCache := !httputils.GetBool(r, "nocache")
 	lookbackDelta, err := getMaxLookback(r)
