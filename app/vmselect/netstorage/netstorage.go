@@ -109,8 +109,8 @@ var (
 	resultsPool   []*Results
 )
 
-// GetResults returns results from pool
-func GetResults() *Results {
+// getResults returns results from pool
+func getResults() *Results {
 	resultsPoolMu.Lock()
 	defer resultsPoolMu.Unlock()
 	if len(resultsPool) > 0 {
@@ -1388,13 +1388,10 @@ type blockAddrs struct {
 // it helps to imporve cache locality and avoid lock contention
 type tmpBlocksFileWrapper struct {
 	tbfs []*tmpBlocksFile
-	// holds a index references for blockAddrs and orderedMetricNamess
+	// holds a index references for blockAddrs
 	// by coresponding workerID
 	blockAddrsIndexesByMetricName []map[string]int
-	// holds a buffer for metricNames used as a key for index map
-	// and a metricName at blockAddrs
-	metricNamesBufs [][]byte
-	blockAddrs      [][]blockAddrs
+	blockAddrs                    [][]blockAddrs
 }
 
 var (
@@ -1411,7 +1408,6 @@ func getTBFW(n int) *tmpBlocksFileWrapper {
 	defer tbfwPoolMu.Unlock()
 	var tbfw *tmpBlocksFileWrapper
 	if len(tbfwPool) > 0 {
-		// pop item
 		tbfw = tbfwPool[len(tbfwPool)-1]
 		tbfwPool = tbfwPool[:len(tbfwPool)-1]
 	}
@@ -1429,7 +1425,6 @@ func getTBFW(n int) *tmpBlocksFileWrapper {
 		tbfw = &tmpBlocksFileWrapper{
 			blockAddrsIndexesByMetricName: ms,
 			blockAddrs:                    bas,
-			metricNamesBufs:               make([][]byte, n),
 		}
 	}
 	tbfs := make([]*tmpBlocksFile, n)
@@ -1439,7 +1434,6 @@ func getTBFW(n int) *tmpBlocksFileWrapper {
 	tbfw.tbfs = tbfs
 	tbfw.blockAddrs = tbfw.blockAddrs[:n]
 	tbfw.blockAddrsIndexesByMetricName = tbfw.blockAddrsIndexesByMetricName[:n]
-	tbfw.metricNamesBufs = tbfw.metricNamesBufs[:n]
 	return tbfw
 }
 
@@ -1447,7 +1441,6 @@ func putTBFW(tbfw *tmpBlocksFileWrapper) {
 	for i := range tbfw.blockAddrs {
 		tbfw.blockAddrs[i] = tbfw.blockAddrs[i][:0]
 		tbfw.blockAddrsIndexesByMetricName[i] = make(map[string]int, len(tbfw.blockAddrsIndexesByMetricName[i]))
-		tbfw.metricNamesBufs[i] = tbfw.metricNamesBufs[i][:0]
 	}
 	tbfw.tbfs = nil
 	tbfwPoolMu.Lock()
@@ -1492,14 +1485,11 @@ func (tbfw *tmpBlocksFileWrapper) RegisterAndWriteBlock(mb *storage.MetricBlock,
 	addrs.addrs = append(addrs.addrs[:0], addr)
 	// An optimization for big number of time series with long names: store only a single copy of metricNameStr
 	// in both tbfw.orderedMetricNamess and tbfw.ms.
-	dstLenM := len(tbfw.metricNamesBufs[workerID])
-	tbfw.metricNamesBufs[workerID] = bytesutil.ResizeWithCopyMayOverallocate(tbfw.metricNamesBufs[workerID], dstLenM+len(metricName))
-	copy(tbfw.metricNamesBufs[workerID][dstLenM:], metricName)
+	addrs.metricName = bytesutil.ResizeNoCopyMayOverallocate(addrs.metricName, len(metricName))
+	copy(addrs.metricName, metricName)
 
-	// store a string that points to the buffer inside index map
-	metricNameStr := bytesutil.ToUnsafeString(tbfw.metricNamesBufs[workerID][dstLenM:])
-	addrs.metricName = tbfw.metricNamesBufs[workerID][dstLenM:]
-
+	metricNameStr := bytesutil.ToUnsafeString(addrs.metricName)
+	// point index to the top of the buffer
 	m[metricNameStr] = len(blockAddrss) - 1
 	tbfw.blockAddrs[workerID] = blockAddrss
 
@@ -1536,7 +1526,7 @@ func (tbfw *tmpBlocksFileWrapper) FinalizeTo(dst []packedTimeseries) ([]packedTi
 			dst = dst[:dstLen]
 			pts := &dst[len(dst)-1]
 			// copy metricName
-			pts.metricName = bytesutil.ResizeNoCopyMayOverallocate(pts.metricName[:0], len(blockAddrss.metricName))
+			pts.metricName = bytesutil.ResizeNoCopyMayOverallocate(pts.metricName, len(blockAddrss.metricName))
 			copy(pts.metricName, blockAddrss.metricName)
 			// point added metricName to the end of dst timeseries slice
 			metricName := bytesutil.ToUnsafeString(pts.metricName)
@@ -1663,7 +1653,6 @@ func (e limitExceededErr) Error() string { return e.err.Error() }
 // ProcessSearchQuery performs sq until the given deadline.
 //
 // Results.RunParallel or Results.Cancel must be called on the returned Results.
-// TODO fix it
 func ProcessSearchQuery(qt *querytracer.Tracer, denyPartialResponse bool, sq *storage.SearchQuery, deadline searchutils.Deadline) (*Results, bool, error) {
 	qt = qt.NewChild("fetch matching series: %s", sq)
 	defer qt.Done()
@@ -1678,6 +1667,8 @@ func ProcessSearchQuery(qt *querytracer.Tracer, denyPartialResponse bool, sq *st
 	}
 	sns := getStorageNodes()
 	tbfw := getTBFW(len(sns))
+	// TODO conditionally return tbfw back to the pool
+	// some requests may poison it
 	defer putTBFW(tbfw)
 	blocksRead := newPerNodeCounter(sns)
 	samples := newPerNodeCounter(sns)
@@ -1702,7 +1693,7 @@ func ProcessSearchQuery(qt *querytracer.Tracer, denyPartialResponse bool, sq *st
 		closeTmpBlockFiles(tbfw.tbfs)
 		return nil, false, fmt.Errorf("error occured during search: %w", err)
 	}
-	rss := GetResults()
+	rss := getResults()
 	rss.tr = tr
 	rss.deadline = deadline
 	var bytesTotal uint64

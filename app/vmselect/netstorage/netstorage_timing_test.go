@@ -154,7 +154,7 @@ func BenchmarkTmpFileWrapper(b *testing.B) {
 				}
 			}
 			var err error
-			rss := GetResults()
+			rss := getResults()
 			rss.tr = tr
 			rss.deadline = deadline
 			rss.packedTimeseries, _, err = tbfw.FinalizeTo(rss.packedTimeseries[:0])
