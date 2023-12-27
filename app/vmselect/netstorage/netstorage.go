@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/bits"
 	"net"
 	"net/http"
 	"os"
@@ -1463,7 +1464,8 @@ func (tbfw *tmpBlocksFileWrapper) RegisterAndWriteBlock(mb *storage.MetricBlock,
 	blockAddrsIdx, ok := m[string(metricName)]
 	if ok {
 		// fast path
-		tbfw.blockAddrs[workerID][blockAddrsIdx].addrs = append(tbfw.blockAddrs[workerID][blockAddrsIdx].addrs, addr)
+		addrs := &tbfw.blockAddrs[workerID][blockAddrsIdx]
+		addrs.addrs = append(addrs.addrs, addr)
 		return nil
 	}
 	// first time met this metricName
@@ -1471,12 +1473,7 @@ func (tbfw *tmpBlocksFileWrapper) RegisterAndWriteBlock(mb *storage.MetricBlock,
 	blockAddrss := tbfw.blockAddrs[workerID]
 
 	dstLenB := len(blockAddrss) + 1
-	if dstLenB > cap(blockAddrss) {
-		// allocate buffer with additional capacity and copy values
-		newBas := make([]blockAddrs, dstLenB*2)
-		blockAddrss = append(newBas[:0], blockAddrss...)
-	}
-	blockAddrss = blockAddrss[:dstLenB]
+	blockAddrss = resizeWithCopyMayOverallocate[blockAddrs](blockAddrss, dstLenB)
 	addrs := &blockAddrss[len(blockAddrss)-1]
 	// pre-allocate memory for tmpBlockAddrs
 	if cap(addrs.addrs) == 0 {
@@ -1515,15 +1512,12 @@ func (tbfw *tmpBlocksFileWrapper) FinalizeTo(dst []packedTimeseries) ([]packedTi
 			dstAddrsIdx, ok := ptsIndexByMetricName[string(blockAddrss.metricName)]
 			if ok {
 				// fast path
-				dst[dstAddrsIdx].addrs = append(dst[dstAddrsIdx].addrs, blockAddrss.addrs...)
+				pts := &dst[dstAddrsIdx]
+				pts.addrs = append(pts.addrs, blockAddrss.addrs...)
 				continue
 			}
 			dstLen := len(dst) + 1
-			if dstLen > cap(dst) {
-				newDst := make([]packedTimeseries, dstLen*2)
-				dst = append(newDst[:0], dst...)
-			}
-			dst = dst[:dstLen]
+			dst = resizeWithCopyMayOverallocate[packedTimeseries](dst, dstLen)
 			pts := &dst[len(dst)-1]
 			// copy metricName
 			pts.metricName = bytesutil.ResizeNoCopyMayOverallocate(pts.metricName, len(blockAddrss.metricName))
@@ -1535,6 +1529,22 @@ func (tbfw *tmpBlocksFileWrapper) FinalizeTo(dst []packedTimeseries) ([]packedTi
 		}
 	}
 	return dst, bytesTotal, nil
+}
+
+// TODO move to different package
+func resizeWithCopyMayOverallocate[T any](b []T, n int) []T {
+	if n <= cap(b) {
+		return b[:n]
+	}
+	nNew := roundToNearestPow2(n)
+	bNew := make([]T, nNew)
+	copy(bNew, b)
+	return bNew[:n]
+}
+
+func roundToNearestPow2(n int) int {
+	pow2 := uint8(bits.Len(uint(n - 1)))
+	return 1 << pow2
 }
 
 var metricNamePool = &sync.Pool{
