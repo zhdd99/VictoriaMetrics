@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -85,7 +86,10 @@ func main() {
 	envflag.Parse()
 	buildinfo.Init()
 	logger.Init()
-	pushmetrics.Init()
+
+	// create a custom context for the pushmetrics module to close the metric reporting goroutine when the vmstorage process is shutdown.
+	pushMetricsCtx, cancelPushMetric := context.WithCancel(context.Background())
+	pushmetrics.Init(pushMetricsCtx)
 
 	storage.SetDedupInterval(*minScrapeInterval)
 	storage.SetDataFlushInterval(*inmemoryDataFlushInterval)
@@ -143,7 +147,8 @@ func main() {
 		logger.Fatalf("cannot stop http service: %s", err)
 	}
 	logger.Infof("successfully shut down http service in %.3f seconds", time.Since(startTime).Seconds())
-
+	// close the metric reporting goroutine
+	cancelPushMetric()
 	logger.Infof("gracefully shutting down the service")
 	startTime = time.Now()
 	stopStaleSnapshotsRemover()

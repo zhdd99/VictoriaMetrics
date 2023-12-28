@@ -29,15 +29,24 @@ func init() {
 }
 
 // Init must be called after logger.Init
-func Init() {
+// If a context is provided, it uses that; otherwise, it defaults to context.Background().
+func Init(customCtxs ...context.Context) {
 	extraLabels := strings.Join(*pushExtraLabel, ",")
+	var ctx context.Context
+	if len(customCtxs) > 0 {
+		// Use the provided context
+		ctx = customCtxs[0]
+	} else {
+		// No context provided, default to context.Background()
+		ctx = context.Background()
+	}
 	for _, pu := range *pushURL {
 		opts := &metrics.PushOptions{
 			ExtraLabels:        extraLabels,
 			Headers:            *pushHeader,
 			DisableCompression: *disableCompression,
 		}
-		if err := metrics.InitPushExtWithOptions(context.Background(), pu, *pushInterval, appmetrics.WritePrometheusMetrics, opts); err != nil {
+		if err := metrics.InitPushExtWithOptions(ctx, pu, *pushInterval, appmetrics.WritePrometheusMetrics, opts); err != nil {
 			logger.Fatalf("cannot initialize pushmetrics: %s", err)
 		}
 	}
